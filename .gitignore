@@ -1,0 +1,10 @@
+# Ignore Config.swift with API keys
+MyFirstWeatherApp/Config.swift
+**/Config.swift
+
+# Xcode user-specific files
+*.xcuserstate
+xcuserdata/
+
+# OS files
+.DS_Store
