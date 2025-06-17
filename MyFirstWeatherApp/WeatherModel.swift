@@ -46,4 +46,5 @@ struct DailyForecast {
     let lowTemp: Double
     let condition: String
     let description: String
+    let mainCondition: String
 } 

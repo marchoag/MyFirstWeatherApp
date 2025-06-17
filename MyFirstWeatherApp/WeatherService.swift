@@ -7,6 +7,14 @@
 
 import Foundation
 
+enum WeatherError: Error {
+    case invalidAPIKey
+    case cityNotFound
+    case serverError
+    case dataParsingError
+    case networkError
+}
+
 class WeatherService {
     static let shared = WeatherService()
     private init() {}
@@ -16,11 +24,17 @@ class WeatherService {
         let apiKey = Config.openWeatherMapAPIKey
         let units = "metric" // Always fetch in Celsius for consistent conversion
         
+        print("API Key (first 8 chars): \(String(apiKey.prefix(8)))...")
+        print("City: \(city)")
+        
         // URL encode the city parameter to handle spaces and special characters
         guard let encodedCity = city.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: "\(baseURL)?q=\(encodedCity)&appid=\(apiKey)&units=\(units)") else {
-            throw URLError(.badURL)
+            print("URL creation failed")
+            throw WeatherError.networkError
         }
+        
+        print("Request URL: \(url.absoluteString)")
         
         // Create URLRequest with timeout
         var request = URLRequest(url: url)
@@ -30,15 +44,31 @@ class WeatherService {
         
         // Check for HTTP status codes
         if let httpResponse = response as? HTTPURLResponse {
-            if httpResponse.statusCode == 404 {
-                throw URLError(.badServerResponse)
+            print("HTTP Status Code: \(httpResponse.statusCode)")
+            print("Response URL: \(httpResponse.url?.absoluteString ?? "No URL")")
+            
+            if httpResponse.statusCode == 401 {
+                print("API Key Error: Invalid API key")
+                throw WeatherError.invalidAPIKey
+            } else if httpResponse.statusCode == 404 {
+                print("City Not Found Error")
+                throw WeatherError.cityNotFound
             } else if httpResponse.statusCode != 200 {
-                throw URLError(.badServerResponse)
+                print("HTTP Error: \(httpResponse.statusCode)")
+                if let responseData = String(data: data, encoding: .utf8) {
+                    print("Response: \(responseData)")
+                }
+                throw WeatherError.serverError
             }
         }
         
-        let weatherResponse = try JSONDecoder().decode(WeatherResponse.self, from: data)
-        return weatherResponse
+        do {
+            let weatherResponse = try JSONDecoder().decode(WeatherResponse.self, from: data)
+            return weatherResponse
+        } catch {
+            print("JSON Decode Error: \(error)")
+            throw WeatherError.dataParsingError
+        }
     }
     
     func getForecast(for city: String, useFahrenheit: Bool = true) async throws -> [DailyForecast] {
@@ -76,7 +106,7 @@ class WeatherService {
         let today = calendar.startOfDay(for: Date())
         
         // Group forecast items by day
-        var dailyForecasts: [Date: (highs: [Double], lows: [Double], conditions: [String])] = [:]
+        var dailyForecasts: [Date: (highs: [Double], lows: [Double], conditions: [String], mainConditions: [String])] = [:]
         
         for item in forecastItems {
             let date = Date(timeIntervalSince1970: TimeInterval(item.dt))
@@ -86,13 +116,14 @@ class WeatherService {
             if dayStart <= today { continue }
             
             if dailyForecasts[dayStart] == nil {
-                dailyForecasts[dayStart] = (highs: [], lows: [], conditions: [])
+                dailyForecasts[dayStart] = (highs: [], lows: [], conditions: [], mainConditions: [])
             }
             
             dailyForecasts[dayStart]?.highs.append(item.main.temp)
             dailyForecasts[dayStart]?.lows.append(item.main.temp)
             if let weather = item.weather.first {
                 dailyForecasts[dayStart]?.conditions.append(weather.description)
+                dailyForecasts[dayStart]?.mainConditions.append(weather.main)
             }
         }
         
@@ -103,14 +134,16 @@ class WeatherService {
             guard let data = dailyForecasts[day],
                   let high = data.highs.max(),
                   let low = data.lows.min(),
-                  let condition = data.conditions.first else { return nil }
+                  let condition = data.conditions.first,
+                  let mainCondition = data.mainConditions.first else { return nil }
             
             return DailyForecast(
                 date: day,
                 highTemp: high,
                 lowTemp: low,
                 condition: condition,
-                description: condition.capitalized
+                description: condition.capitalized,
+                mainCondition: mainCondition
             )
         }
     }
